@@ -1,0 +1,190 @@
+#include <SimpleDHT.h>
+#include <LiquidCrystal.h>
+#include <SoftwareSerial.h> // va creer un serial virtuel
+
+SoftwareSerial BTSerial(10, 11); // RX | TX  = > BT-TX=10 BT-RX=11
+
+// pour DHT11, 
+//      VCC: 5V or 3V
+//      GND: GND
+//      DATA: 2
+int pinDHT11 = 5;
+SimpleDHT11 dht11(pinDHT11);
+const int rs = 24, en = 25, d4 = 29, d5 = 30, d6 = 31, d7 = 32;
+LiquidCrystal lcd ( rs, en, d4, d5, d6, d7);
+
+float result;
+int temp;
+
+int etatTemp = 0; //booleen d'activation de la température
+float slAlarmTemp = 35; //Valeur (en C°) d'activation de l'alarme de température
+
+byte temperature = 0;
+byte humidite = 0;
+
+long unsigned tempoMesure = 0; //gérer le temps entre les mesures de temp et humid
+
+
+void setup() {
+  Serial.begin(9600);
+  BTSerial.begin(9600); 
+  tempoMesure = 0; // avoir un temps de reference pour ne pas envoyer les mesures chaque milisec
+}
+
+void loop()
+{
+    String message; //variable qui va recevoir les messages reçues via bluetooth
+    modeAuto();
+     while (BTSerial.available()) //boucle while qui s’active tant que l’on va recevoir une information via bluetooth avec “BTSerial.available()
+     {
+      Serial.println("Recu sur bluetooth");
+          
+          message = BTSerial.readString(); // Lecture du message envoyé par le BT
+          // Ecriture du message dans le serial usb
+  
+          
+          // recuperation de l'etat initial pour definir la position des sliders
+          if(message=="etat"){
+    
+//            BTSerial.println("etatalarm=" + String(etatAlarm));
+            delay(100);
+            BTSerial.println("etattemp=" + String(etatTemp));  
+            delay(100);
+            BTSerial.println("sltemp=" + String(slAlarmTemp));  
+     
+          }
+     
+          if(message=="etattemp=1"){
+            etatTemp=1;
+            Serial.println("A");
+          }
+          else if(message=="etattemp=0"){
+            etatTemp=0;
+            Serial.println("B");
+          }
+          else if(message=="etatalarm=1"){
+//            etatAlarm=1;
+            Serial.println("C");
+          }
+          else if(message=="etatalarm=0"){
+//            etatAlarm=0;
+            Serial.println("D");
+          }      
+          else{
+            Serial.println("G");
+            decoupeur(message);
+          }
+          
+          Serial.println("#");
+          Serial.println(message);
+          Serial.println("#");
+        }
+    
+    //Temperature
+    
+      if(etatTemp ==1 && ((millis() - tempoMesure) > 5000))//si stTemp==1 et que le temps actuel “millis()” moins la dernière mesure “tempoMesure” est supérieur à 5000 alors on va mesurer la température avec “getTemperature()
+      {
+            getTemperature();
+            Serial.println("Envoie de la temperature au BT");
+            BTSerial.println("temp=" + String(temperature) ); 
+            delay(100);
+            BTSerial.println("hum=" + String(humidite) );  
+            delay(100);
+            tempoMesure = millis();
+        
+            Serial.print("float temperature");
+            Serial.println((float)temperature);
+            Serial.print("slalarmtemp");
+            Serial.println(slAlarmTemp);
+            // on va comparer aussi la temperature a slAlarmTemp pour declencher l'alarme de l'arduino
+            if( (float)temperature > slAlarmTemp )
+            {
+              Serial.println("Alarme arduino");
+            }
+            
+      }
+    
+     
+    
+    
+      while (Serial.available())
+      {
+          Serial.println("Recu sur serial");
+          // Lecture du message envoyé par le serial usb
+          message = Serial.readString();
+          // Ecriture du message dans le BT
+          BTSerial.println(message);
+        }
+      // start working...
+      //Serial.println("=================================");
+      
+      
+    
+      
+  
+}
+
+void modeAuto()
+{
+    lcd.setCursor(0, 2);
+       lcd.print ("eclairage : ");
+       result = analogRead (A0);
+       temp = map( result, 0, 1023, 0,100);
+       lcd.print(temp);
+       lcd.print("%");
+       delay(300);
+      lcd.clear();
+
+}
+void getTemperature()
+{
+
+   temperature = 0;
+   humidite = 0;
+   int err = SimpleDHTErrSuccess;
+   if ((err = dht11.read(&temperature, &humidite, NULL)) != SimpleDHTErrSuccess)
+   {
+      Serial.print("Lecture DHT11 failed, err=");
+      Serial.println(err);
+      delay(1000);
+      return;
+   }
+
+  Serial.print("Sample OK: ");
+  Serial.print((int)temperature);
+  Serial.print(" *C, "); 
+  Serial.print((int)humidite);
+  Serial.println(" H");
+
+}
+
+void decoupeur(String inputString)
+{
+
+      char inputChar[inputString.length()+1] ;
+      inputString.toCharArray(inputChar,inputString.length()+1);
+ 
+        // lit toute les commandes separes par des &
+       
+        char* command = strtok(inputChar, "&");
+        // boucle sur toutes les commandes
+        while (command != 0)
+        {
+            // decoupe command en deux valeurs , separateur :
+       
+            char* valueCommand = strchr(command, '=');
+            if (valueCommand != 0)
+            {
+                *valueCommand = 0;
+                ++valueCommand;         
+                // aiguillage par rapport a la valeur de command 
+                  if(String(command) == "slalarm"){
+                    slAlarmTemp = String(valueCommand).toFloat();
+                    
+                  }
+            }
+            // Recherche une nouvelle commande separes pas un &
+            
+            command = strtok(0, "&");
+        }
+}
